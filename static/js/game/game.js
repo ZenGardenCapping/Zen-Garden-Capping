@@ -1,53 +1,71 @@
 const UPDATE_MS = 100;  //10 updates per second
 
+const DEMO_MODE = false;
+
+const FIVE_MINUTES = 5 * 60 * 1000;
+
+const PHASE_COUNT = 3;
+
 class Game {
     constructor(canvas_id) {
         this.canvas = document.getElementById(canvas_id);
 
-        this.dialogue = new Dialogue();
-        this.environment = new Environment();
-        this.audio = new Audio();
-        this.particle = new Particle();
-
         this.babInterface = new BabylonInterface(this.canvas);
+
+        this.environment = new Environment(this.babInterface);
         this.garden = new Garden(this.babInterface);
+
+        this.userInterface = new UserInterface(
+            this.babInterface, this.garden);
+
+        this.phaseCount = 0;
     }
 
-    init() {
+    nextPhase() {
+        var gsize = (1 + this.phaseCount) * 2;
+        this.garden.addSandAndFrames(gsize, gsize);
+
+        this.phaseCount++; 
+        if(this.phaseCount >= PHASE_COUNT) return;
+
+        const game = this;
+        window.setTimeout(function() {
+            game.nextPhase();
+            game.userInterface.nextUnlockLevel();
+        }, (1 + this.phaseCount) * 5000);
+    }
+
+    init(callback) {
         const game = this;
 
         //babylon setup: create a scene, camera, and sun
-        this.babScene = this.babInterface.createScene(this.canvas,
+        this.babScene = this.babInterface.createScene(
             function() {
-                game.garden.update(10);
+                game.userInterface.init();
+                game.userInterface.setHelpText(
+                    "Welcome to Enso! Tap and drag to move around.");
+                game.userInterface.randomRing();
 
-                game.garden.addObject("succulent", 0, 0);
-				game.garden.addObject("rock_sml_0", 4, 2);
-				game.garden.addObject("rock_sml_1", -3, 4);
+                game.garden.addSandAndFrames(0, 0);
+
+                //get environmental data from various APIs
+                if(DEMO_MODE) {
+                    game.nextPhase();
+                    game.babInterface.startFPSLogging();
+
+                    //for demo, gradually increase size
+                    window.setInterval(function() {
+                        game.environment.nextDemo();
+                    }, 20 * 1000);
+                } else {
+                    game.nextPhase();
+                    game.environment.getWeatherData();
+                }
+
+                callback();        
             }
         );
 
-        //enable brownian noise (silent until wind speed is set)
-        this.audio.playNoise();
-        this.audio.setWindSpeed(10);
-        this.dialogue.request(null);
 
-        //get environmental data from various APIs
-        this.environment.getWeatherData(function(data) {
-            //TODO add day time brightness
-
-            //apply wind speed to noise and particle system
-            game.particle.setWindSpeed(data.wind.speed);
-
-            //apply weather condition to particle system
-            game.particle.setCondition(data);
-
-            //ask server for dialogue based on condition string
-        });
-
-        setInterval(function() {
-            game.audio.tweenStrength();
-
-        }, UPDATE_MS);
     }
 }

@@ -6,16 +6,13 @@ class Dialogue {
         $("#"+dialogueID).fadeIn();
     }
 
-    request(weather_data) {
-        //fetch dialogue from the server
-        $.post("/environment/post/", weather_data)
-            .done(function(dialogue_str) {
-
-                //fade the dialogue out, replace it, and fade in
-                $("#"+dialogueID).fadeOut(function() {
-                    $("#"+dialogueID).html(dialogue_str);
-                    $("#"+dialogueID).fadeIn();
+    request(env_data) {
+        $("#"+dialogueID).fadeOut(function() {
+                    
+                    $("#"+dialogueID).html(localStorage.getItem("dialogue"));
+                    window.setTimeout(function() {
+                        $("#"+dialogueID).fadeIn();
+                    }, 1000);
                 }); 
-            });
     }
 }

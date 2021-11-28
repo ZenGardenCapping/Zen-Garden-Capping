@@ -1,18 +1,98 @@
 const ANIMATION_FRAMERATE = 60;
 
+const PANNING_OFF = new BABYLON.Vector3(0,0,0);
+const PANNING_HOR = new BABYLON.Vector3(1,0,1);
+
 class BabylonInterface {
 
     constructor(canvas) {
         const engine = new BABYLON.Engine(canvas, true);
 
+        this.canvas = canvas;
         this.engine = engine;
         window.addEventListener("resize", function() {
             engine.resize();
         });
     }
 
-    addTransition(property, y0, y1, easeFun) {
-        const transition = new BABYLON.Animation(
+    createScene(meshCallback) {
+        this.scene = new BABYLON.Scene(this.engine);
+        this.scene.clearColor = new BABYLON.Color3(0, 0, 0);
+        
+        this.camera = new BABYLON.ArcRotateCamera(
+            "camera", 
+            -Math.PI/2,                     // starting horizontal rotation
+            Math.PI/2.5,                    // starting vertical rotation
+            15,                              // radius
+            new BABYLON.Vector3(0, 2, 0));    // camera point to look at
+
+        //zoom settings
+        this.camera.lowerRadiusLimit = 6;
+        this.camera.upperRadiusLimit = 100;
+
+        //rotation bounds
+        this.camera.lowerBetaLimit = 0.5;
+        this.camera.upperBetaLimit = Math.PI/2;
+
+        //start in movement mode
+        this.camera.panningAxis = PANNING_HOR;
+        this.camera.panningSensibility = 500;
+
+        this.camera.attachControl(this.canvas, true);
+
+        this.sun = new BABYLON.DirectionalLight(
+            "sun", 
+            new BABYLON.Vector3(0, 0, 0), this.scene); 
+
+        this.passiveLight = new BABYLON.HemisphericLight(
+            "passive", 
+            new BABYLON.Vector3(10, 10, 10), this.scene);
+        this.passiveLight.intensity = 0.25;
+
+        //create easing animations for objects
+        //scale up from 0
+        this.scaleUpX = this.makeTransition("scaling.x", 0, 1);
+        this.scaleUpY = this.makeTransition("scaling.y", 0, 1);
+        this.scaleUpZ = this.makeTransition("scaling.z", 0, 1);
+
+        const babInt = this;
+
+        BABYLON.SceneLoader.ImportMeshAsync("", 
+            "static/assets/", "zen-garden.babylon").
+            then(function(result) {
+
+                //hide all meshes
+                for(var i in result.meshes) {
+                    var mesh = result.meshes[i];
+                    mesh.isVisible = false;
+                     
+                    //give a cartoony outline if not a frame or sand
+                    if(mesh.name.search("frame") == -1 &&
+                       mesh.name.search("sand") == -1) {
+                        mesh.renderOutline = true;
+                        mesh.outlineColor = BABYLON.Color3.Black;
+                    }
+                }
+
+                babInt.scene.meshes = result.meshes;
+
+                meshCallback();
+
+                babInt.startRendering(); 
+            });
+
+        return this.scene;
+    }
+
+    startRendering() {
+        const scene = this.scene;
+        this.engine.runRenderLoop(function() {
+            scene.render();
+        });
+    }
+
+    makeTransition(property, y0, y1, secs = 1) {
+        var transition = new BABYLON.Animation(
             "transition",
             property,
             ANIMATION_FRAMERATE,
@@ -27,149 +107,119 @@ class BabylonInterface {
         });
 
         keys.push({
-            frame: 1*ANIMATION_FRAMERATE,
+            frame: secs*ANIMATION_FRAMERATE,
             value: y1
         });
 
         transition.setKeys(keys);
 
+        transition.stored_duration = secs * ANIMATION_FRAMERATE;
+
+        var easeFun = new BABYLON.CubicEase(1, 5);
         easeFun.setEasingMode(BABYLON.EasingFunction.EASINGMODE_EASEOUT);
         transition.setEasingFunction(easeFun);
 
         return transition;
     }
 
-    createScene(canvas, meshCallback) {
-        this.scene = new BABYLON.Scene(this.engine);
-        this.scene.clearColor = new BABYLON.Color3(0.2, 0.2, 0.4);
-        
-        this.camera = new BABYLON.ArcRotateCamera(
-            "camera", 
-            -Math.PI/2,                     // starting horizontal rotation
-            Math.PI/2.5,                    // starting vertical rotation
-            15,                              // radius
-            new BABYLON.Vector3(0, 1.5, 0));    // camera point to look at
-
-        //zoom settings
-        this.camera.lowerRadiusLimit = 6;
-        this.camera.upperRadiusLimit = 100;
-
-        //rotation bounds
-        this.camera.lowerBetaLimit = 0.5;
-        this.camera.upperBetaLimit = 1.6;
-
-        //panning settings
-        this.camera.panningAxis = new BABYLON.Vector3(1, 0, 1);
-
-        this.camera.wheelPrecision = 20;
-
-        this.camera.attachControl(canvas, true);
-
-        this.sun = new BABYLON.HemisphericLight(
-            "light", 
-            new BABYLON.Vector3(0.5, 1, 0.5)); // light direction
-
-        //for the demo, add some rain
-        this.startRain();
-
-        //create easing animations for objects
-        //drop in from above
-        this.dropIn = this.addTransition(
-            "position.y", 20, .6,
-            new BABYLON.BounceEase(1, 5));
-        
-        //rise up from below
-        this.riseUp = this.addTransition(
-            "position.y", -20, 0,
-            new BABYLON.CubicEase(1, 5));
-
-        const babInt = this;
-
-        BABYLON.SceneLoader.ImportMeshAsync("", 
-            "static/assets/", "zen-garden.babylon").
-            then(function(result) {
-
-                //hide all meshes
-                for(var i in result.meshes) {
-                    result.meshes[i].isVisible = false;
-
-                    //TODO fix backface culling
-                    result.meshes[i].backFaceCulling = false;
-                }
-
-                babInt.meshes = result.meshes;
-
-                meshCallback();
-
-                babInt.startRendering(); 
-            });
-
-        return this.scene;
+    runTransitions(instance, transitions) {
+        this.scene.beginDirectAnimation(
+            instance, transitions,
+            0, transitions[0].stored_duration, true);
     }
 
     getMesh(name) {
-        for(var i in this.meshes) {
-            if(this.meshes[i].name == name) {
-                return this.meshes[i];
+        for(var i in this.scene.meshes) {
+            if(this.scene.meshes[i].name == name) {
+                return this.scene.meshes[i];
             }
         }
+        return null;
     }
 
-    createMeshInstance(name, pos, rot, fromTop = true) {
+    createMeshInstance(name, pos, rot, fromTop = true, pickable = false) {
         var mesh = this.getMesh(name);
-
-        if(!mesh) {
-            console.log(
-                "WARNING - Ignored attempt to access undefined mesh " +
-                name);
-            console.log(this.meshes);
-            return;
-        }
+        if(!mesh) return null;
 
         var inst = mesh.createInstance(name+"_instance");
         inst.isVisible = true;
         inst.position = pos;
         inst.rotation = rot;
+        inst.isPickable = pickable;
 
         //animate the mesh into position
-        this.scene.beginDirectAnimation(
-            inst,
-            [fromTop ? this.dropIn : this.riseUp],
-            0, 1*ANIMATION_FRAMERATE);
+        this.runTransitions(inst, 
+            fromTop ? 
+            [ this.scaleUpX, this.scaleUpY, this.scaleUpZ ] : 
+            [ this.scaleUpX, this.scaleUpZ ]);
+
+        return inst;
     }
 
-    startRendering() {
-        const scene = this.scene;
-        this.engine.runRenderLoop(function() {
-            scene.render();
-        });
+    removeAllMeshInstances(mesh_name) {
+        var mesh = this.getMesh(mesh_name);
+        if(!mesh) return;
+
+        while(mesh.instances.length > 0) {
+            for(var i in mesh.instances) {
+                mesh.instances[i].dispose();
+            }
+        }
     }
 
-    startRain() {
-        this.rain = new BABYLON.ParticleSystem("rain", 5000);
+    removeInstancesInside(x0, z0, x1, z1) {
+        for(var i in this.scene.meshes) {
+            var mesh = this.scene.meshes[i];
 
-        this.rain.particleTexture = 
-            new BABYLON.Texture("/static/assets/rain.png");
+            if(mesh.instances &&
+               mesh.name.search("frame") == -1 &&
+               mesh.name.search("sand") == -1 &&
+               mesh.name.search("rake") == -1)  {
+                for(var j in mesh.instances) {
+                    var inx = mesh.instances[j].position.x;
+                    var iny = mesh.instances[j].position.y;
+                    var inz = mesh.instances[j].position.z;
 
-        this.rain.minLifeTime = 1;
-        this.rain.maxLifeTime = 1;
+                    if(x0 < inx && inx <= x1 &&
+                       z0 < inz && inz <= z1 &&
+                       -1 < iny && iny <=  1) {
+                        this.removeMeshInstance(
+                            mesh.name, mesh.instances[j]);
+                    }
+                }
+            }
+        }
+    }
 
-        this.rain.emitter = new BABYLON.Vector3(0, 35, 0);
-        
-        this.rain.minEmitBox = new BABYLON.Vector3(-10, 0, -10);
-        this.rain.maxEmitBox = new BABYLON.Vector3(10, 0, 10);
+    removeMeshInstance(mesh_name, inst) {
+        var mesh = this.getMesh(mesh_name);
+        var length0 = mesh.instances.length;
 
-        this.rain.direction1 = new BABYLON.Vector3(0, -50, 0);
-        this.rain.direction2 = new BABYLON.Vector3(0, -60, 0);        
+        while(mesh.instances.length >= length0) {
+            inst.dispose();
+        }
+    }
 
-        this.rain.minSize = 0.1;
-        this.rain.maxSize = 0.9;
+    removeAllMeshes(mesh_name) {
+        var mesh = this.getMesh(mesh_name);
+        while(mesh != null) {
+            mesh.dispose();
+            mesh = this.getMesh(mesh_name);
+        }
+    }
 
-        this.rain.start();
+    enableCamera() {
+        this.camera.attachControl(this.canvas, true);
+    }
 
-        /*BABYLON.ParticleHelper.CreateAsync("rain", this.scene, false).
-            then(function(set) {
-                set.start();
-            });*/
+    disableCamera() {
+        this.camera.detachControl();
+    }
+
+    startFPSLogging() {
+        const babInt = this;
+        window.setInterval(function() {
+            console.log("FPS - " + babInt.engine.getFps().toFixed());
+        }, 1000);
     }
 }
